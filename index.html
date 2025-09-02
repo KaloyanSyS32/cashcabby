@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CashCubby 🐷</title>
+<style>
+:root {
+  --bg:#fdfcf7; --fg:#222; --card:#fff; --accent:#ff7b9c;
+  --accent2:#f5c542; --danger:#d64545; --muted:#ccc;
+}
+[data-theme="dark"] {
+  --bg:#1a1a1a; --fg:#eee; --card:#262626; --accent:#ff99b5;
+  --accent2:#ffd75a; --danger:#ff6b6b; --muted:#444;
+}
+body{
+  font-family:"Segoe UI",Arial,sans-serif;
+  background:var(--bg); color:var(--fg);
+  margin:0; min-height:100vh;
+  display:flex; align-items:flex-start; justify-content:center;
+  padding:20px; transition:background 0.3s,color 0.3s;
+}
+.container{
+  width:100%; max-width:420px; background:var(--card);
+  border-radius:20px; padding:24px; box-shadow:0 6px 14px rgba(0,0,0,0.15);
+}
+h1{margin:0 0 10px 0;text-align:center;font-size:28px;}
+.balance{
+  text-align:center;font-weight:700;font-size:22px;margin:8px 0 14px 0;
+  color:var(--accent2); transition:color 0.25s ease;
+}
+.balance.is-debt{color:var(--accent);}
+label{display:block;margin-top:10px;font-weight:600;}
+input[type="number"],input[type="text"]{
+  width:100%; margin-top:6px; padding:10px 12px;
+  border:1px solid var(--muted); border-radius:10px;
+  background:var(--bg); color:var(--fg); outline:none;
+}
+.buttons{display:flex; gap:4%; margin-top:14px;}
+button.action{flex:1; padding:10px 12px; border:none; border-radius:12px; font-size:16px; cursor:pointer;}
+.add{background:var(--accent2); color:#000;}
+.withdraw{background:var(--accent); color:#fff;}
+.undo{background:var(--danger); color:#fff;}
+ul#history{list-style:none; margin:18px 0 0 0; padding:0;}
+ul#history li{
+  background:var(--bg); border:1px solid var(--muted); border-radius:8px;
+  padding:8px 10px; font-size:14px; margin-bottom:6px;
+}
+.theme-switch{
+  position:fixed; top:10px; right:10px; padding:3px 6px; font-size:12px;
+  border-radius:6px; border:none; background:var(--accent2); cursor:pointer;
+}
+.cloud{
+  margin-top:20px; padding:10px; border-radius:10px; background:var(--bg); border:1px solid var(--muted);
+}
+.cloud button{
+  margin-top:10px; width:100%; padding:8px; border:none; border-radius:8px; cursor:pointer; background:var(--accent2);
+}
+</style>
+</head>
+<body data-theme="light">
+
+<button class="theme-switch" onclick="toggleTheme()">🌗</button>
+
+<div class="container">
+<h1>🐷 CashCubby</h1>
+<div id="balanceRow" class="balance">
+<span id="balance-label">Balance</span>: $<span id="balance">0.00</span>
+</div>
+
+<label for="amount">Amount</label>
+<input id="amount" type="number" step="0.01" placeholder="Enter amount">
+
+<div class="buttons">
+<button class="action add" onclick="deposit()">Deposit</button>
+<button class="action withdraw" onclick="withdraw()">Withdraw</button>
+<button class="action undo" onclick="undo()">Undo</button>
+</div>
+
+<ul id="history"></ul>
+
+<div class="cloud">
+<button onclick="saveCloudRandom()">Save Random Code</button>
+<label for="saveCode">Load Balance (enter code)</label>
+<input id="saveCode" type="text" maxlength="8" placeholder="Enter 8-char code">
+<button onclick="loadCloud()">Load Balance</button>
+</div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+import { getFirestore, doc, setDoc, getDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-firestore.js";
+
+// --- Firebase config ---
+const firebaseConfig = {
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId: "YOUR_APP_ID"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+// --- App logic ---
+let balance = 0;
+let historyStack = [];
+
+const amountInput = document.getElementById('amount');
+const balanceEl = document.getElementById('balance');
+const balanceRow = document.getElementById('balanceRow');
+const balanceLabel = document.getElementById('balance-label');
+const historyEl = document.getElementById('history');
+const saveCodeInput = document.getElementById('saveCode');
+
+function formatMoney(n){ return Number(n).toFixed(2); }
+
+function updateBalanceUI(){
+  if(balance<0){
+    balanceLabel.textContent='Debt';
+    balanceEl.textContent=formatMoney(Math.abs(balance));
+    balanceRow.classList.add('is-debt');
+  } else {
+    balanceLabel.textContent='Balance';
+    balanceEl.textContent=formatMoney(balance);
+    balanceRow.classList.remove('is-debt');
+  }
+}
+
+function addHistory(text){
+  const li=document.createElement('li');
+  li.textContent=`${new Date().toLocaleTimeString()} ${text}`;
+  historyEl.prepend(li);
+}
+
+function deposit(){
+  const amt=parseFloat(amountInput.value);
+  if(isNaN(amt)||amt<=0) return alert('Enter a valid amount');
+  historyStack.push({type:'deposit',amount:amt});
+  balance+=amt;
+  updateBalanceUI();
+  addHistory(`+ $${formatMoney(amt)}`);
+  amountInput.value='';
+}
+
+function withdraw(){
+  const amt=parseFloat(amountInput.value);
+  if(isNaN(amt)||amt<=0) return alert('Enter a valid amount');
+  historyStack.push({type:'withdraw',amount:amt});
+  balance-=amt;
+  updateBalanceUI();
+  addHistory(`- $${formatMoney(amt)}`);
+  amountInput.value='';
+}
+
+function undo(){
+  if(historyStack.length===0){ alert("Nothing to undo"); return; }
+  const last=historyStack.pop();
+  if(last.type==='deposit') balance-=last.amount;
+  if(last.type==='withdraw') balance+=last.amount;
+  if(historyEl.firstChild) historyEl.removeChild(historyEl.firstChild);
+  updateBalanceUI();
+}
+
+function toggleTheme(){
+  document.body.dataset.theme=document.body.dataset.theme==='light'?'dark':'light';
+}
+
+// --- Random code generator ---
+function generateCode(length = 8) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let code = "";
+  for(let i=0;i<length;i++){
+    code += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return code;
+}
+
+// --- Firestore cloud ---
+async function saveCloudRandom(){
+  let code = generateCode();
+  try{
+    await setDoc(doc(db,"piggyBanks",code),{
+      balance: balance,
+      lastUpdated: serverTimestamp()
+    });
+    alert(`Balance saved! Your code: ${code}`);
+  }catch(err){ alert("Error saving: "+err); }
+}
+
+async function loadCloud(){
+  const code = saveCodeInput.value.trim();
+  if(code.length!==8) return alert("Code must be exactly 8 characters");
+  try{
+    const docSnap = await getDoc(doc(db,"piggyBanks",code));
+    if(!docSnap.exists()) return alert("No balance found for this code");
+    balance = docSnap.data().balance || 0;
+    historyStack = [];
+    historyEl.innerHTML = "";
+    updateBalanceUI();
+    alert("Balance loaded from cloud!");
+  }catch(err){ alert("Error loading: "+err); }
+}
+
+// --- Make functions accessible from HTML buttons ---
+window.deposit = deposit;
+window.withdraw = withdraw;
+window.undo = undo;
+window.toggleTheme = toggleTheme;
+window.saveCloudRandom = saveCloudRandom;
+window.loadCloud = loadCloud;
+
+// Init
+updateBalanceUI();
+</script>
+</body>
+</html>
